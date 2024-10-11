@@ -1,0 +1,265 @@
+---
+title: "shooting_project"
+author: "C. Tooley"
+date: "2024-09-04"
+output:
+  html_document: default
+  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## NYC shooting project
+
+Load in the libraries used for this analysis. Specific libraries not used in class are 'ggstatsplot' which I use for my favorite ggplot theme and 'forecast' which is a library that allows you to conduct analysis on time series data.
+
+Then read in the NYC shooting data. View the nyc_shooting dataframe, and provide a summary of all variables.
+
+```{r import and summary}
+library(tidyverse)
+library(ggstatsplot)
+library(forecast)
+
+nyc_shooting <- read_csv('https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD')
+
+nyc_shooting
+
+
+```
+## Cleaning
+
+I started with the imported nyc_shooting and use the function mutate to change all 
+categorical variables of location types, age groups, sex, and race into factors.
+After converting the desired variables into factors by using the mutate function, 
+I converedt occur_date into the month/day/year using the lubridate mdy() function.
+Finally, I selected all data except for x_coord, y_coord, and Lon_Lat because I don't
+know what the x and y coordinates refer to, and Lon_Lat because I would split it
+into two latitude and longitude columns if I wanted to map the data and those columns
+already exist. I haven't removed any more than that because I don't yet know the
+variables I will be interested in analyzing and modeling.
+
+There are a number of NA data in location_desc, loc_of_occur_desc, and loc_classfctn_desc but I am not going to filter the NA location variables because 
+I will be getting rid of a significant amount of data but don't intend to do any
+any analysis on whether or not a shooting happened inside for example.
+
+```{r cleaning}
+nyc_shooting_clean <- nyc_shooting %>% 
+  mutate(BORO = as_factor(BORO),
+        LOC_OF_OCCUR_DESC = as_factor(LOC_OF_OCCUR_DESC),
+        LOC_CLASSFCTN_DESC = as_factor(LOC_CLASSFCTN_DESC),
+        LOCATION_DESC = as_factor(LOCATION_DESC),
+        PERP_AGE_GROUP = as_factor(PERP_AGE_GROUP),
+        PERP_SEX = as_factor(PERP_SEX),
+        PERP_RACE = as_factor(PERP_RACE),
+        VIC_AGE_GROUP = as_factor(VIC_AGE_GROUP),
+        VIC_SEX = as_factor(VIC_SEX),
+        VIC_RACE = as_factor(VIC_RACE),
+        OCCUR_DATE = mdy(OCCUR_DATE),
+        PERP_AGE_GROUP = fct_recode(PERP_AGE_GROUP, 'UNKNOWN' = '(null)'),
+        PERP_AGE_GROUP = fct_relevel(PERP_AGE_GROUP, "<18", "18-24", "25-44", 
+                                     "45-64", "65+", "UNKNOWN"),
+        VIC_AGE_GROUP = fct_relevel(VIC_AGE_GROUP, "<18", "18-24", "25-44", 
+                                     "45-64", "65+", "UNKNOWN")) %>%
+  select(-c(X_COORD_CD,Y_COORD_CD,Lon_Lat)) %>% 
+  filter(PERP_AGE_GROUP != '1020',
+         PERP_AGE_GROUP != '224',
+         PERP_AGE_GROUP != '940',
+         PERP_AGE_GROUP != '1028',
+         PERP_AGE_GROUP != '(null)',
+         VIC_AGE_GROUP != '1022') %>%
+  droplevels()
+  
+
+nyc_shooting_clean
+
+summary(nyc_shooting_clean)
+```
+
+##Visualization and analysis
+
+After taking a look at some of the cleaned data, I've decided to take a look at 
+overall shooting trends by Borough. Ive started by using the group_by() function
+to group by year and Borough to get the data required to make a line graph and a
+box and whisker plot of the data. 
+
+The intent of the line plots are to determine if
+there are any obvious or interesting trends in the number of shootings over time.
+There appears to be significant decrease in shootings until 2018/2019 where they 
+reverse course and increase again until 2022 when they all begin to decline again.
+
+The intent of the box and whisker plot is to get a visual of some  rough summary statistics. From the box and whisper I see a few major takeaways. Booklyn and the Bronx have the highest mean shooting and variance. Staten island appears to have a
+significantly lower mean and variance in total shootings.
+
+
+
+```{r analysis and visualization}
+#get yearly shooting counts
+shooting_by_year <- nyc_shooting_clean %>%
+  mutate(year = year(OCCUR_DATE)) %>% 
+  group_by(year, BORO) %>%            
+  summarize(count = n())
+
+#get mean, sd, from the counts for box and whisker
+summary_stats <- shooting_by_year %>%
+  group_by(BORO) %>%
+  summarize(
+    mean = mean(count),
+    sd = sd(count),
+    .groups = 'drop'
+  )
+
+shooting_by_year
+
+#plot line graph of yearly shooting counts by borough
+ggplot(shooting_by_year) +
+  aes(x = year, y = count, colour = BORO) +
+  geom_line() +
+  geom_point()+
+  labs(
+    x = "Year",
+    y = "Total Shootings",
+    title = "Yearly New York City Shooting Trends By Borough",
+    subtitle = "NYPD Shooting Incident Data (Historic)",
+    caption = " https://catalog.data.gov/dataset",
+    color = "Borough"
+  ) +
+  theme_ggstatsplot() +
+  theme(legend.position = 'right')
+
+#box and whisker by borough
+ggplot(shooting_by_year) +
+  aes(x = BORO, y = count, fill = BORO) +
+  geom_boxplot() +
+  geom_point(data = summary_stats, aes(y = mean), color = "black", size = 1.3) +
+  #stat_summary(fun = mean, geom = "point", color = "black", size = 1.3) +
+  geom_text(data = summary_stats, 
+            aes(y = mean, label = paste0("Mean: ",round(mean,2))), vjust = -2.4, color = "black", size = 2.5) +
+  theme_ggstatsplot()+
+  labs(
+    x = "Borough",
+    y = "Total Shootings",
+    title = "Yearly New York City Shooting Trends By Borough",
+    subtitle = "NYPD Shooting Incident Data (Historic)",
+    caption = " https://catalog.data.gov/dataset"
+  )+
+  theme(legend.position = 'none')
+
+```
+
+After looking at yearly statistics I wondered what they would look like from a monthly perspective. I grouped by month, year, and borough to get a higher resolution
+look at shootings over time.
+
+The line graph below shows oscillations over time that look like they might show a seasonal trend.
+
+```{r seasonality}
+shooting_by_month <- nyc_shooting_clean %>%
+    mutate(month = month(OCCUR_DATE),
+           year = year(OCCUR_DATE)) %>% 
+    group_by(month, year, BORO) %>%            
+    summarize(count = n(), .groups = 'drop') 
+
+shooting_by_month <- shooting_by_month %>%
+    mutate(date = as.Date(paste(year, month, "01", sep = "-"), format = "%Y-%m-%d"))
+
+ggplot(shooting_by_month, aes(x = date, y = count, color = BORO))+
+  geom_line(size = .5) +
+  geom_point(size = .7) +
+  facet_wrap(~BORO)+
+  theme_ggstatsplot()+
+  labs(
+    x = "Date",
+    y = "Total Shootings",
+    title = "Monthly New York City Shooting Trends By Borough",
+    subtitle = "NYPD Shooting Incident Data (Historic)",
+    caption = " https://catalog.data.gov/dataset"
+  )+
+  theme(legend.position = 'none')
+
+
+
+
+```
+ 
+
+## Bias
+
+
+After discovering that there may be a seasonal bias to the data I began to wonder how I could confirm that hunch so, in order to look at the monthly trends below I've grouped by borough and month only and plotted the number of shootings per month which has confirmed my assumptions that there is indeed seasonality in the shooting data with a much higher number of shooting occurring in the summer months and fewer shootings in the winter. A trend that persists across boroughs with the exception of Staten Island.
+
+```{r seasonality continued}
+seasons <- nyc_shooting_clean %>%
+     mutate(month = month(OCCUR_DATE)) %>% 
+     group_by(month, BORO) %>%            
+     summarize(count = n())
+
+ggplot(seasons) +
+     aes(x = month, y = count, colour = BORO) +
+     geom_line() +
+     geom_point()+
+  theme_ggstatsplot()+
+  labs(
+    x = "Month",
+    y = "Total Shootings",
+    title = "Seasonal New York City Shooting Trends By Borough",
+    subtitle = "NYPD Shooting Incident Data (Historic)",
+    caption = " https://catalog.data.gov/dataset"
+  )+
+  theme(legend.position = 'right')
+```
+
+After confirming my suspicion that shootings were seasonal, I wondered if I could model the data in a way that minimized the noise from seasonality. This question led me to a library called forecast which allows you to to correct time series data for what is called called seasonality.
+
+I've made a list of boroughs and iterated through them. Each iteration takes the
+shooting_by_month dataset above filters all boro data not being analyzed per loop and then arranges it by year then month. Ive then made a time series object that starts at the earliest date and establishes 12 months in the object.
+
+With this new time series object, I then used stl() to remove the 'seasonality' from the data and finally plotted the decomposed time series data which yielded a plot for each borough that models and takes the raw data, determines a seasonal contribution, shows the trend with seasonal bias removed, and finally stl() displays the remainder, which displays data that is not accurately captured in the model. Large deviations are indicated by
+longer lines above and below the "0" line of the plot. 
+
+
+```{r decomposition}
+
+#generate dataframe or borough names
+boroughs <- unique(shooting_by_month$BORO)
+
+#loop through each borough in the shooting_by_month dataframe and filter only the
+#borough in this loop and arrange by year and month
+for (boro in boroughs) {
+  borough_data <- shooting_by_month %>%
+    filter(BORO == boro) %>%
+    arrange(year, month)
+  
+  #generate original time series without correction
+  orig_ts <- ts(borough_data$count, 
+                start = c(min(borough_data$year), min(borough_data$month)), 
+                frequency = 12)
+  
+  #generate time series data corrected for seasonality
+  decomposed_ts <- stl(orig_ts, s.window = "periodic")
+  
+  #make a plot for the current borough
+  plot(decomposed_ts, main = paste("Decomposition for", boro))
+}
+```
+
+## Additional Questions
+
+Additional questions I have are about using some new techniques that I've learned about while researching time series analysis:
+
+1.
+I'd like to conduct and understand forecast::auto.arima() analysis on the data and learn how to interpret these outputs.
+
+
+2.
+I'd like to learn how to do forecasting on time series data to make predictions about what the future might hold.
+
+## Session Information
+
+The following represents my session information at the time of completion.
+
+```{r session information}
+sessionInfo()
+```
+
+
