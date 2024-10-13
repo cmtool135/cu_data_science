@@ -1,0 +1,391 @@
+---
+title: "Tooley_covid_final"
+author: "C. Tooley"
+date: "2024-09-27"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## Introduction
+
+In this markdown I will begin with a recreation of the work done in our classes 
+with minimal modifications as practice. In the second portion I will use lm() to
+experiment with making a few of my own models. I've made some comparisons that I
+expect to have rather large p-values and a final model that I expect to be extremely
+linear to get a feel for how these models work and how to interpret their summaries
+and graphs
+
+```{r libraries and import, warning = FALSE, message=FALSE}
+library(tidyverse)
+
+#first part of urls
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+#second part of urls
+file_names <- c("time_series_covid19_confirmed_global.csv",
+                "time_series_covid19_deaths_global.csv",
+                "time_series_covid19_confirmed_US.csv",
+                "time_series_covid19_deaths_US.csv")
+
+#combined
+urls <- str_c(url_in,file_names)
+
+#read in each csv
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+us_cases <- read_csv(urls[3])
+us_deaths <- read_csv(urls[4])
+
+```
+
+## Cleaning the data
+
+This portion has several steps from class which have been described individually with comments
+
+```{r cleaning, message=FALSE}
+#clean global_cases
+global_cases <- global_cases %>% 
+  pivot_longer(cols = -c(`Province/State`,`Country/Region`, Lat,Long),
+               names_to = 'date',
+               values_to = 'cases') %>% 
+  select(-c(Lat,Long))
+
+#clean global deaths
+global_deaths <- global_deaths %>% 
+  pivot_longer(cols = -c(`Province/State`,`Country/Region`, Lat,Long),
+               names_to = 'date',
+               values_to = 'deaths') %>% 
+  select(-c(Lat,Long))
+
+#join global cases and deaths into one dataset
+global <- global_cases %>%
+  full_join(global_deaths) %>% 
+  rename(Country_Region = `Country/Region`,
+         Province_State = `Province/State`) %>% 
+  mutate(date = mdy(date))
+
+#filter out instances where cases = 0
+global <- global %>% 
+  filter(cases > 0)
+
+#pivot us cases longer
+us_cases<- us_cases %>% 
+  pivot_longer(cols = -(UID:Combined_Key), 
+               names_to = "date",
+               values_to = 'cases') %>% 
+  select(Admin2:cases) %>% 
+  mutate(date = mdy(date)) %>% 
+  select( -c(Lat, Long_))
+
+#pivot us deaths longer
+us_deaths <- us_deaths %>% 
+  pivot_longer(cols = -(UID:Population), 
+               names_to = "date",
+               values_to = 'deaths') %>% 
+  select(Admin2:deaths) %>% 
+  mutate(date = mdy(date)) %>% 
+  select( -c(Lat, Long_))
+
+#full join us data
+us <- us_cases %>% 
+  full_join(us_deaths)
+
+#uite province state, country region into combined key
+global <- global %>% 
+  unite('Combined_Key', 
+        c(Province_State, Country_Region),
+        sep = ", ",
+        na.rm = T,
+        remove = F)
+
+#find data with population
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"  
+
+#read in the population data
+uid <- read_csv(uid_lookup_url) %>%
+  select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+
+#join population and global data
+global <- global %>%
+  left_join(uid,by = c('Province_State', 'Country_Region')) %>% 
+  select(-c(UID, FIPS)) %>% 
+  select(Province_State, Country_Region, date, cases, deaths, Population, Combined_Key)
+
+#summarize by state 
+US_by_state <- us %>% 
+  group_by(Province_State, Country_Region, date) %>% 
+  summarize(cases = sum(cases), 
+            deaths = sum(deaths),
+            Population = sum(Population)) %>% 
+  mutate(deaths_per_mill = deaths * 1000000 / Population) %>% 
+  select(Province_State, Country_Region, date, cases, deaths, deaths_per_mill, 
+         Population) %>% 
+  ungroup()
+
+#summarize by country
+us_totals <- US_by_state %>% 
+  group_by(Country_Region, date) %>% 
+  summarize(cases = sum(cases),
+            deaths = sum(deaths),
+            Population = sum(Population)) %>% 
+  mutate(deaths_per_mill = deaths * 1000000 / Population) %>% 
+  select(Country_Region, date, cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+```
+
+## State and country visualizations from class
+
+```{r}
+#visualization by country
+us_totals %>% 
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases))+
+  geom_line(aes(color = "cases"))+
+  geom_point(aes(color = "cases"))+
+  geom_line(aes(y = deaths, color = 'deaths'))+
+  geom_point(aes(y = deaths, color = "deaths"))+
+  scale_y_log10()+
+  theme(legend.position = 'bottom',
+        axis.text.x = element_text(angle = 90))+
+  labs(title = 'Covid-19 in US', y = NULL)+
+  theme_minimal()
+
+```
+
+
+
+```{r, warning=FALSE}
+#visualization by state
+state <- 'New York'
+
+US_by_state %>%
+  filter(Province_State == state) %>% 
+  filter(cases > 0) %>% 
+  ggplot(aes(x = date, y = cases))+
+  geom_line(aes(color = "cases"))+
+  geom_point(aes(color = "cases"))+
+  geom_line(aes(y = deaths, color = 'deaths'))+
+  geom_point(aes(y = deaths, color = "deaths"))+
+  scale_y_log10()+
+  theme(legend.position = 'bottom',
+        axis.text.x = element_text(angle = 90))+
+  labs(title = str_c('Covid-19 in ', state), y = NULL)+
+  theme_minimal()
+
+```
+
+## Analysis from class of new cases and deaths by country and state
+
+```{r}
+#beginning analysis by adding new cases and new deaths
+
+US_by_state <- US_by_state %>% 
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+
+us_totals <- us_totals %>% 
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+
+
+```
+
+
+```{r, warning=FALSE}
+#plot us new cases/deaths
+us_totals %>% 
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = new_cases))+
+  geom_line(aes(color = "new_cases"))+
+  geom_point(aes(color = "new_cases"))+
+  geom_line(aes(y = new_deaths, color = 'new_deaths'))+
+  geom_point(aes(y = new_deaths, color = "new_deaths"))+
+  scale_y_log10()+
+  theme(legend.position = 'bottom',
+        axis.text.x = element_text(angle = 90))+
+  labs(title = 'Covid-19 in US', y = NULL)+
+  theme_minimal()
+
+
+```
+
+
+```{r, warning=FALSE}
+#plot state new cases/deaths
+US_by_state %>%
+  filter(Province_State == state) %>% 
+  filter(cases > 0) %>% 
+  ggplot(aes(x = date, y = new_cases))+
+  geom_line(aes(color = "new_cases"))+
+  geom_point(aes(color = "new_cases"))+
+  geom_line(aes(y = new_deaths, color = 'new_deaths'))+
+  geom_point(aes(y = new_deaths, color = "new_deaths"))+
+  scale_y_log10()+
+  theme(legend.position = 'bottom',
+        axis.text.x = element_text(angle = 90))+
+  labs(title = str_c('Covid-19 in ', state), y = NULL)+
+  theme_minimal()
+
+```
+
+## Introduction to modeling from class
+
+```{r}
+#cases per thousand, last transformation
+us_state_totals <- US_by_state %>%
+  group_by(Province_State) %>% 
+  summarize(deaths = max(deaths), 
+            cases = max(cases),
+            population = max(Population),
+            cases_per_thou = 1000 * cases / population,
+            deaths_per_thou = 1000 * deaths / population) %>% 
+  filter(cases > 0,
+         population > 0)
+
+```
+
+
+
+
+```{r}
+#linear model example from class
+mod <- lm(deaths_per_thou ~ cases_per_thou, data = us_state_totals)
+
+#check the summary of the linear model
+summary(mod)
+
+#generate a prediction
+us_tot_w_pred <- us_state_totals %>% mutate(pred = predict(mod))
+
+#plot the prediction
+us_tot_w_pred %>%
+  ggplot()+
+  geom_point(aes(x = cases_per_thou, y = deaths_per_thou), color = 'blue')+
+  geom_point(aes(x = cases_per_thou, y = pred), color = 'red')+
+  theme_minimal()
+
+#use plot() to help assess the quality of the linear model
+
+# 'Residuals vs Fitted' checks the linearity assumption
+# 'Q-Q residuals' checks for normality of residuals
+# 'Scale-Location' checks for constant variance of residuals
+# 'Residuals vs Leverage' checks the most influential observations
+plot(mod)
+```
+
+## My models and predictions
+
+```{r generate models and predictions}
+#I generate my own linear models based on the number of deaths/cases per thousand
+#and the number of cases overall as a result of population
+
+#I expect the  cases/deaths per thousand to have a weak correlation, and cases 
+#as a function of total population to have a strong correlation
+mod_death_per_pop <- lm(deaths_per_thou ~ population, data = us_state_totals)
+mod_case_per_pop <- lm(cases_per_thou ~ population, data = us_state_totals)  
+mod_total_case_pop <- lm(cases ~ population, data = us_state_totals)
+
+
+#generate predictions for each model for plotting
+us_tot_w_pred_pop <- us_state_totals %>% mutate(pred_death = predict(mod_death_per_pop),
+                                                pred_case = predict(mod_case_per_pop),
+                                                tot_case_pop = predict(mod_total_case_pop))
+
+
+
+```
+
+
+
+
+```{r cases per thousand linear model 1}
+#plotting cases per thousand as a function of population
+us_tot_w_pred_pop%>%
+  ggplot()+
+  geom_point(aes(x = population, y = cases_per_thou), color = 'blue')+
+  geom_point(aes(x = population,  y = pred_case), color = 'red')+
+  theme_minimal()
+
+#check the summary of the linear model
+summary(mod_case_per_pop)
+
+#use plot() to help assess the quality of the linear model
+
+# 'Residuals vs Fitted' checks the linearity assumption
+# 'Q-Q residuals' checks for normality of residuals
+# 'Scale-Location' checks for constant variance of residuals
+# 'Residuals vs Leverage' checks the most influential observations
+plot(mod_case_per_pop)
+
+```
+
+
+```{r deaths per thousand linear model 2}
+#plotting deaths per thousand as a function of population
+us_tot_w_pred_pop%>%
+  ggplot()+
+  geom_point(aes(x = population, y = deaths_per_thou), color = 'blue')+
+  geom_point(aes(x = population,  y = pred_death), color = 'red')+
+  theme_minimal()
+
+#check the summary of the linear model
+summary(mod_death_per_pop)
+
+#use plot() to help assess the quality of the linear model
+
+# 'Residuals vs Fitted' checks the linearity assumption
+# 'Q-Q residuals' checks for normality of residuals
+# 'Scale-Location' checks for constant variance of residuals
+# 'Residuals vs Leverage' checks the most influential observations
+plot(mod_death_per_pop)
+
+```
+
+```{r total cases linear model 3}
+
+#total cases as a function of population
+us_tot_w_pred_pop%>%
+  ggplot()+
+  geom_point(aes(x = population, y = cases), color = 'blue')+
+  geom_point(aes(x = population,  y = tot_case_pop), color = 'red')+
+  theme_minimal()
+
+
+#check the summary of the linear model
+summary(mod_total_case_pop)
+
+#use plot() to help assess the quality of the linear model
+
+# 'Residuals vs Fitted' checks the linearity assumption
+# 'Q-Q residuals' checks for normality of residuals
+# 'Scale-Location' checks for constant variance of residuals
+# 'Residuals vs Leverage' checks the most influential observations
+plot(mod_total_case_pop)
+
+```
+
+
+## Bias
+
+The purpose of the diagnostic plots generated by the 'plot()' function ('Residuals vs Fitted', 'Q-Q residuals', 'Scale-Location', and 'Residuals vs Leverage') is to identify any potential bias or problems with using a linear model 'lm()' to model your data.
+
+The Residuals vs Fitted plot indicates potential bias if you get a curve or funnel shape
+may indicate that a linear model might not be the best match for the data. Each of the 
+plots generated by my models indicate a bit of a funnel shape so a linear model may not be appropriate
+
+The Q-Q residuals plot indicates whether or not the residuals of your linear model are normally distributed. Normal distribution of residuals is a requirement for a successful linear model as deviations from normality can have an impact on hypothesis tests and confidence intervals which will lead to biased conclusions.
+
+The Scale - Location plot can indicate that the variance of your residuals change over the course of your dataset which can bias your conclusions.
+
+The residuals vs Leverage plot indicates points that have a significant influence on the models estimates. Identification of these points helps you investigate whether or not those observations are valid and should be in your model.
+
+Overall, In each of these models I see evidence that a linear model may not be appropriate, or that there may be some observations that may significantly bias the data. Further investigation must be done before drawing conclusions from these models but are likely beyond the scope of this course.
+
+
+```{r session information}
+sessionInfo()
+```
