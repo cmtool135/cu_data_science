@@ -8,6 +8,18 @@ output: html_document
 ```{r setup, include=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
+#list required packages
+required_packages <- c('tidyverse')  
+
+# Check for missing packages and install them
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) {
+  install.packages(new_packages)
+}
+
+# Load libraries
+lapply(required_packages, library, character.only = TRUE)
+
 ```
 
 ## Introduction
