@@ -9,6 +9,17 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+required_packages <- c("tidyverse", "ggstatsplot", "forecast")  # Add your required packages here
+
+# Check for missing packages and install them
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) {
+  install.packages(new_packages)
+}
+
+# Load libraries
+lapply(required_packages, library, character.only = TRUE)
 ```
 
 ## NYC shooting project
