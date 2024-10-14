@@ -100,7 +100,7 @@ there are any obvious or interesting trends in the number of shootings over time
 There appears to be significant decrease in shootings until 2018/2019 where they 
 reverse course and increase again until 2022 when they all begin to decline again.
 
-The intent of the box and whisker plot is to get a visual of some  rough summary statistics. From the box and whisper I see a few major takeaways. Booklyn and the Bronx have the highest mean shooting and variance. Staten island appears to have a
+The intent of the box and whisker plot is to get a visual of some  rough summary statistics. From the box and whisker I see a few major takeaways. Booklyn and the Bronx have the highest mean shooting and variance. Staten island appears to have a
 significantly lower mean and variance in total shootings.
 
 
